@@ -157,16 +157,11 @@ class SocketWrapper
   def initialize(socket)
     @socket = socket
     @tell = 0
-    @count_buffer = StringIO.new
   end
   def tell
     return @tell
   end
   def << (data)
-    #@count_buffer << data
-    #@tell += @count_buffer.pos
-    #@count_buffer.rewind
-    #@socket << data
     @tell += @socket.write data
     @socket
   end
