@@ -1,0 +1,73 @@
+<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta charset="UTF-8"><title>奇妙工具</title>
+<script>
+function ajax(q,c){var x=new XMLHttpRequest();if(typeof c!="undefined")x.onreadystatechange=function(){if(x.readyState==4&&x.status==200)c(x.responseText);else if(x.readyState==4&&(x.status==403||x.status==502))document.getElementById("err").innerHTML=x.responseText;};x.open("GET",q,true);x.send(null)}
+function dl() {
+	var link = document.getElementById("link");
+	var res;
+	if (link.value == "請選擇欲下載之集數") {
+		var uri = "";
+		for(var i=0;i<types.length;i++) {
+			var opts = document.getElementById("typesel_" + types[i]).options;
+			for (var j=0;j<opts.length; j++) {
+				if (opts[j].selected) uri += "!" + opts[j].value;
+				opts[j].selected = false;
+			}
+		}
+		location.href = "/" + book_id + "/book/" + uri.substr(1);
+	} else if (res = link.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/view\/\?cid=([0-9]+)/)) {
+		document.getElementById("list").innerHTML = "";
+		link.value = "";
+		location.href = "/" + res[1] + "/" + res[2];
+	} else if (res = link.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/book/)) {
+		book_id = res[1];
+		ajax("/" + book_id + "/book/list",function(res) {
+			var ary = res.split("\n");
+			types = [];
+			var type_now = -1;
+			var type_heads = "<tr>"
+			var opts = "<tr>";
+			for(var i=0;i<ary.length;i++) {
+				var sub = ary[i].split("!");
+				if (sub[0] == "type") {
+					var type = parseInt(sub[1], 10);
+					if (type_now != type) {
+						type_now = type;
+						types.push(type);
+						type_heads += "<td>" + sub[2] + "</td>";
+						if (type_now != -1) opts += '</select></td>';
+						opts += '<td><select id="typesel_' + type + '" size="30" multiple="multiple" style="min-width: 100px;">';
+					}
+				} else if (sub[0] == "ep") {
+					opts += '<option value="' + sub[1] + '">' + sub[2] + '</option>';
+				}
+			}
+			document.getElementById("list").innerHTML = '<table>' + type_heads + '</tr>' + opts + '</select></td></tr></table>';
+			link.value = "請選擇欲下載之集數";
+			document.getElementById('dlbtn').value = "下載";
+		});
+	} else {
+		document.getElementById("err").innerHTML = "輸入錯誤";
+	}
+}
+function input_change() {
+	document.getElementById('err').innerHTML = '';
+	var dlbtn = document.getElementById('dlbtn');
+	if (res = link.value.match(/(?:http:\/\/)?(.+):(.+)\/bukas\/([0-9]+)\/book/)) {
+		dlbtn.value = "清單";
+	} else {
+		dlbtn.value = "下載";
+	}
+}
+</script>
+<style></style>
+</head><body>
+輸入芝麻開門的布卡連結<br>
+PS:可輸入單話觀看連結或輸入單本網址(會提示選擇範圍)<br>
+如:http://芝麻開門之布卡網址/200090/view/?cid=65540<br>
+http://芝麻開門之布卡網址/200090/book<br>
+<span style="color: red; font-size: 0.7em;">目前壓縮檔損毀問題已修正，先前下載的復壓縮檔可透過修復(WinRAR或其他工具)解決。</span><br>
+<input type="text" id="link" onchange="input_change();" onkeydown="input_change();" style="width: 400px;"><br>
+<input type="button" id="dlbtn" value="下載" onclick="dl();"><br>
+<span id="err" style="color: red;"></span>
+<div id="list"></div>
+<body></html>
