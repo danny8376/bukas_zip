@@ -440,7 +440,6 @@ begin
       eps = []
       
       eps = has_options ? ids[4] : ids[3]
-      eps = eps[2...eps.length] if eps.start_with?("1:")  # compatible to opensesame wrong format - wait to be fix and remove this
       eps = eps.split("!")
       eps.each_with_index { |val, idx| eps[idx] = val.to_i }
       # sort
