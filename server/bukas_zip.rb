@@ -14,7 +14,7 @@ rescue LoadError => exception
 end
 
 
-logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'bukas_zip.log')
+logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'log/bukas_zip.log')
 
 
 
