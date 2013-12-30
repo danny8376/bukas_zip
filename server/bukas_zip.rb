@@ -1,5 +1,6 @@
 #encoding:UTF-8
 require 'rubygems'
+#require 'bundler/setup' # uncomment this if you are using bundler
 require 'zip'
 require 'open-uri'
 require 'socket'
@@ -14,7 +15,13 @@ rescue LoadError => exception
 end
 
 
-logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'log/bukas_zip.log')
+if ENV['PORT']  # heroku Owo
+  logger = Logger.new(STDOUT)
+  srv_port = ENV['PORT']
+else
+  logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'log/bukas_zip.log')
+  srv_port = $bukas_zip_srv_port
+end
 
 
 
@@ -235,7 +242,7 @@ end
 
 
 
-server = TCPServer.new('0.0.0.0', 34837)
+server = TCPServer.new('0.0.0.0', srv_port)
 
 index = File.open("bukas_zip_index.html", "r") {|f| f.read}
 load("open_sesame.secret") # got secret !
