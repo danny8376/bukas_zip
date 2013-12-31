@@ -4,6 +4,7 @@ require 'rubygems'
 require 'zip'
 require 'open-uri'
 require 'socket'
+require 'em-http'
 require 'logger'
 
 # Ropencc
@@ -15,13 +16,25 @@ rescue LoadError => exception
 end
 
 
+load("open_sesame.secret") # got secret !
+
+
 if ENV['PORT']  # heroku Owo
-  logger = Logger.new(STDOUT)
-  srv_port = ENV['PORT']
+  $logger = Logger.new(STDOUT)
+  $srv_port = ENV['PORT']
 else
-  logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'log/bukas_zip.log')
-  srv_port = $bukas_zip_srv_port
+  $logger = Logger.new(ARGV[0] == "debug" ? STDOUT : 'log/bukas_zip.log')
+  $srv_port = $bukas_zip_srv_port
 end
+
+
+
+
+# consts
+MAX_PER_IP_CONS = 5
+MAX_TOTAL_CONS = 50
+
+
 
 
 
@@ -144,87 +157,6 @@ end
 
 
 
-def get_file(uri)
-  count = 1
-  begin
-    return open(uri) {|f| f.read}
-  rescue
-    return false if (count += 1) > 3
-    retry
-  end
-end
-
-
-
-
-
-
-
-class SocketWrapper
-  def initialize(socket)
-    @socket = socket
-    @tell = 0
-  end
-  def tell
-    return @tell
-  end
-  def << (data)
-    @tell += @socket.write data
-    @socket
-  end
-end
-
-class ExitEarly < Exception
-end
-
-
-
-
-
-
-
-
-def handle_admin_socket(sock)
-  sock.puts "welcome, admin!"
-  notify_thread = nil
-  loop do
-    cmd = sock.gets.chomp
-    if cmd == "down"
-      $ready_to_down = true
-      sock.puts "down!"
-    elsif cmd == "up"
-      $ready_to_down = false
-      sock.puts "\\ up /"
-    elsif cmd == "status"
-      sock.puts $ready_to_down ? "down!" : "\\ up /"
-    elsif cmd == "list"
-      $download_clients.each { |client, downloading| sock.puts "%40s : %s" % [client, downloading]}
-      sock.puts "========== finish =========="
-    elsif cmd == "notify"
-      if notify_thread and notify_thread.alive?
-        sock.puts "already notifying!"
-      else
-        notify_thread = Thread.fork(sock) do |sock|
-          loop do
-            if $download_clients.empty?
-              sock.puts "all downloads finished"
-              break
-            end
-            sleep 1
-          end
-        end
-        sock.puts "start notifying!"
-      end
-    else
-      sock.puts "wrong command!"
-    end
-  end
-  notify_thread.kill if notify_thread and notify_thread.alive?
-end
-
-
-
-
 
 
 
@@ -242,159 +174,230 @@ end
 
 
 
-server = TCPServer.new('0.0.0.0', srv_port)
 
-index = File.open("bukas_zip_index.html", "r") {|f| f.read}
-load("open_sesame.secret") # got secret !
 
-logger.info "Server waiting..."
 
-per_ip_cons = {}
-tatal_cons = 0
+$index = File.open("bukas_zip_index.html", "r") {|f| f.read}
 
-MAX_PER_IP_CONS = 5
-MAX_TOTAL_CONS = 50
 
-$download_clients = {}
-
+$downloading_clients = []
 
 $ready_to_down = false
 
 
-loop do
 
-Thread.fork(server.accept) do |socket|
 
-# plus cons
-tatal_cons += 1
-port, ip = Socket.unpack_sockaddr_in(socket.getpeername)
-per_ip_cons[ip] = 0 unless per_ip_cons.has_key?(ip)
-per_ip_cons[ip] += 1
 
-begin
+
+class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
-  # check max cons
-  if tatal_cons > MAX_TOTAL_CONS or per_ip_cons[ip] > MAX_PER_IP_CONS or $ready_to_down
-    request = socket.gets(128)
-    if request.start_with?("GET / HTTP/1.")
-      socket.print "HTTP/1.1 200 OK\r\n" +
-                   "Content-Type: text/html\r\n" +
-                   "Connection: close\r\n"
-      socket.print "\r\n"
-      socket.print index
-    elsif request.start_with?("GET /robots.txt HTTP/1.")
-      socket.print "HTTP/1.1 200 OK\r\n" +
-                   "Content-Type: text/plain\r\n" +
-                   "Connection: close\r\n"
-      socket.print "\r\n"
-      socket.print "User-agent: *\nDisallow: /"
-    elsif request.start_with?("ADMIN") and ip == "127.0.0.1" # admin socket
-      handle_admin_socket socket
-    elsif request.start_with?("ADMIN")
-      logger.fatal("#{ip} may try to hack admin?")
-      socket.print "HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n501 Not Implemented"
-    else
-      socket.print "HTTP/1.1 403 Forbidden\r\n" +
-                   "Content-Type: text/html\r\n" +
-                   "Connection: close\r\n"
-      socket.print "\r\n"
-      if $ready_to_down
-        socket.print "本服務準備下線維修/更新<br\>暫時停止新下載連線<br\>請等待維修/更新結束，稍後再連線"
-      elsif tatal_cons > MAX_TOTAL_CONS
-        socket.print "Server is busy now - try again latter"
-      else
-        socket.print "You are downloading too many files simultaneously - Clam down!"
-      end
+  class EMConnWrapper
+    def initialize(conn)
+      @conn = conn
+      @tell = 0
     end
-    raise ExitEarly.new
+    def tell
+      return @tell
+    end
+    def << (data)
+      return self unless data
+      @tell += data.bytesize
+      @conn.send_data data
+      self
+    end
   end
   
   
-  client_id = "#{ip}:#{port}-#{Time.now.to_i}"
   
-  # Read the first line of the request (the Request-Line)
-  request = socket.gets(4096) # avoid too long?
-  raise ExitEarly.new unless request
-  if request.start_with?("ADMIN") and ip == "127.0.0.1" # admin socket
-    handle_admin_socket socket
-    raise ExitEarly.new
-  elsif request.start_with?("ADMIN")
-    logger.fatal("#{ip} may try to hack admin?")
-    socket.print "HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n501 Not Implemented"
-    raise ExitEarly.new
+  
+  
+  attr_reader :peer_ip, :client_id, :filename
+  def post_init
+    super
+    port, @peer_ip = Socket.unpack_sockaddr_in(get_peername)
+    @client_id = "#{@peer_ip}:#{port}-#{Time.now.to_i}"
+    @os_conn = @bukas_conn = nil
+    @read_to_down_check = 0
+    @conn_closed = false
   end
-  request = request.split(" ")
   
-  raise ExitEarly.new if request.size < 3
-  if !["GET"].include?(request[0]) or !request[2].start_with?("HTTP/1.")
-    socket.print "HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n501 Not Implemented"
-    raise ExitEarly.new
+  def unbind
+    super
+    @conn_closed = true
+    # kill admin notify thread if there is
+    @notify_thread.kill if @hc_mode == :admin and @notify_thread and @notify_thread.alive?
+    end_download
   end
-  request_uri = URI.parse(request[1])
   
-  header = {}
-  #while (hline = socket.gets) and !hline.empty? and hline != "\r\n"
-  #  hline = hline.split(": ")
-  #  hline[1][-2, 2] = ""
-  #  header[hline[0].downcase.to_sym] = hline[1]
-  #end
+  def end_download
+    $downloading_clients.delete(self) if $downloading_clients.include?(self)
+    @os_conn.close if @os_conn
+    @bukas_conn.close if @bukas_conn
+  end
   
-  post_data = ""
-  #if request[0] == "POST"
-  #  while !socket.eof? and (datline = socket.read)
-  #    post_data += datline
-  #  end
-  #end
+  # rewrite receive_line for admin console
+  def receive_line(line)
+    case @hc_mode
+    when :discard_blanks # in this mode, it should be first line OwO
+      if line =~ /^ADMIN( WIN)?$/ # triggered console mode
+        if admin_allowed?
+          @win_mode = $1 == " WIN"
+          @hc_mode = :admin
+          @notify_thread = nil
+          send_data "welcome, admin!\n"
+        else
+          $logger.fatal "#{@peer_ip} may try to hack admin?"
+          bad_request
+        end
+      else
+        super line
+      end
+    when :admin # process admin commands!
+      handle_admin line
+    else
+      super line
+    end
+  end
   
+  # is admin?
+  def admin_allowed?
+    $admin_ips.include? @peer_ip
+  end
   
-  ids = request_uri.path.split("/")
-  
-  if request_uri.path == "/robots.txt"
-    socket.print "HTTP/1.1 200 OK\r\n" +
-                 "Content-Type: text/plain\r\n" +
-                 "Connection: close\r\n"
-    socket.print "\r\n"
-    socket.print "User-agent: *\nDisallow: /"
-  elsif ids.empty?
-    socket.print "HTTP/1.1 200 OK\r\n" +
-                 "Content-Type: text/html\r\n" +
-                 "Connection: close\r\n"
-    socket.print "\r\n"
-    socket.print index
-  elsif (  ids.size == 4 or (ids.size == 5 and ids[3].start_with?("options!"))  ) and ids[2] == "book" # single_book
-    # Ex: book_id/ep1!ep2!ep3!ep4
+  # process admin console
+  def handle_admin(cmd)
+    case cmd
+    when "down"
+      $ready_to_down = true
+      send_data "down!\n"
+    when "up"
+      $ready_to_down = false
+      send_data "\\ up /\n"
+    when "status"
+      send_data $ready_to_down ? "down!\n" : "\\ up /\n"
+    when "list", "ls"
+      $downloading_clients.each { |client| send_data "%-30s : %s\n" % [client.client_id, @win_mode ? encode_str(client.filename) : client.filename]}
+      send_data "========== finish ==========\n"
+    when "notify"
+      if @notify_thread and @notify_thread.alive?
+        send_data "already notifying!\n"
+      else
+        @notify_thread = Thread.fork(self) do |con|
+          loop do
+            if $downloading_clients.empty?
+              con.send_data "all downloads finished\n"
+              break
+            end
+            sleep 1
+          end
+        end
+        send_data "start notifying!\n"
+      end
+    when "exit"
+      send_data "bye!\n"
+      close_connection_after_writing
+    else
+      send_data "wrong command!\n"
+    end
+  end
     
+  # server busy?
+  def download_busy? # pass block !
+    ip_cons = $downloading_clients.count { |client| client.peer_ip == @peer_ip }
+    if $downloading_clients.size > MAX_TOTAL_CONS or ip_cons + 1 > MAX_PER_IP_CONS or $ready_to_down
+      if $ready_to_down
+        forbidden :down
+      elsif $downloading_clients.size > MAX_TOTAL_CONS
+        forbidden :total
+      else
+        forbidden :ip
+      end
+    else
+      yield
+    end
+  end
+  
+  # process request
+  def receive_request(headers, content)
+    @headers = headers_2_hash headers
+    request = headers.first.split(" ")
+    return bad_request unless request.size == 3
+    @method, @uri, @protocol = request
+    return not_implemented unless @method == "GET" or @protocol.start_with? "HTTP/"
+    # process request
+    handle_request
+  rescue Exception => e
+    $logger.error "error happened\n" +
+                  "URI: #{@uri.to_s}\n" +
+                  e.inspect + "\n" +
+                  "\t" + e.backtrace.join("\n\t")
+    
+    send_error "HTTP/1.1 500 Internal Server Error\r\n" +
+               "Content-Type: text/html\r\n" +
+               "Connection: close\r\n" +
+               "\r\n" +
+               "Internal Server Error - Please report this to admin"
+  end
+  
+  # main request handling
+  def handle_request
+    case @uri
+    when "/"
+      send_data "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/html\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+      send_data $index
+      close_connection_after_writing
+    when "/robots.txt"
+      send_data "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/plain\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+      send_data "User-agent: *\nDisallow: /"
+      close_connection_after_writing
+    when /^\/\d+\/\d+$/
+      download_busy? { handle_single }
+    when /^\/\d+\/book(?:(?:\/list|(?:\/options![^\/]+)?\/[\d!]+))$/
+      download_busy? { handle_book }
+    else
+      not_found
+    end
+  end
+  
+  # download book
+  def handle_book
     # 以下URI分析
+    ids = @uri.split("/")
     id = ids[1].to_i
     idstr = id.to_s
     
-    raise URI::InvalidURIError.new if id == 0
     
     list_mode = ids[3] == "list"
     
     # 分析書本頁 抓出各話ID & 對應分類(單行OR連載)
-    type_list = {}
-    ep_list = {}
-    book_name = ""
-    non_sort_count = non_sort_count_init = 9000
-    open("http://#{$open_sesame_url}/bukas/#{id}/book", $open_sesame_auth) do |sesame|
+    open_sesame_req("/bukas/#{id}/book") do |res|
+      @type_list = {}
+      @ep_list = {}
+      book_name = ""
+      non_sort_count = non_sort_count_init = 9000
       type_now = nil
-      while (!sesame.eof?)
-        line = sesame.readline
-        if line =~ /<h1>(.+)<\/h1>/
+      res.each_line do |line|
+        case line
+        when /<h1>(.+)<\/h1>/
           book_name = $1.chomp
-        elsif line =~ /<h4 data-type="([0-9]+)">(.+)<\/h4>/
+        when /<h4 data-type="([0-9]+)">(.+)<\/h4>/
           type_now = $1.to_i
-          type_list[type_now] = $2.chomp
-          ep_list[type_now] = [] if list_mode
+          @type_list[type_now] = $2.chomp
+          @ep_list[type_now] = [] if list_mode
           non_sort_count = non_sort_count_init
-        elsif line =~ /<a href="\/bukas\/([0-9]+)\/view\/\?cid=([0-9]+)"><input type="checkbox" class="check_me" value="([0-9]+)" \/>(.+)<\/a>/
+        when /<a href="\/bukas\/([0-9]+)\/view\/\?cid=([0-9]+)"><input type="checkbox" class="check_me" value="([0-9]+)" \/>(.+)<\/a>/
           ep = $2.to_i
           if type_now.nil? || $1 != idstr || $2 != $3
-            raise OpenURI::HTTPError.new("format err", nil)
+            break
           else
             if list_mode
-              ep_list[type_now].push [ep, $4.chomp]
+              @ep_list[type_now].push [ep, $4.chomp]
             else
               sort_val = type_now * 10000 # base - type
               ep_name = $4.chomp
@@ -404,214 +407,271 @@ begin
                 sort_val += non_sort_count
                 non_sort_count -= 1
               end
-              ep_list[ep] = [type_now, ep_name, sort_val]
+              @ep_list[ep] = [type_now, ep_name, sort_val]
             end
           end
         end
       end
-      raise OpenURI::HTTPError.new("format err", nil) if type_list.empty? || ep_list.empty?
-    end
-    
-    if list_mode
-      ####
-      
-      socket.print "HTTP/1.1 200 OK\r\n" +
-                   "Content-Type: text/plain; charset=\"utf-8\"\r\n" +
-                   "Connection: close\r\n"
-      socket.print "\r\n"
-      type_list.each do |type_id, type_name|
-        socket.print "type!#{type_id}!#{type_name}\n"
-        for i in ep_list[type_id].reverse
-          socket.print "ep!#{i[0]}!#{i[1]}\n"
+      if @type_list.empty? || @ep_list.empty?
+        bad_gateway
+      elsif list_mode
+        send_data "HTTP/1.1 200 OK\r\n" +
+                  "Content-Type: text/plain; charset=\"utf-8\"\r\n" +
+                  "Connection: close\r\n" +
+                  "\r\n"
+        @type_list.each do |type_id, type_name|
+          send_data "type!#{type_id}!#{type_name}\n"
+          @ep_list[type_id].reverse.each { |i| send_data "ep!#{i[0]}!#{i[1]}\n" }
         end
-      end
-      
-      
-    else
-      ####
-      
-      
-      
-      # 分析URL - 下載清單
-      has_options = ids[3].start_with?("options!")
-      fn_encoding = "big5"
-      use_conv = true
-      if has_options
-        options = ids[3][8...ids[3].length].split("!")
-        for opt in options
-          fn_encoding = opt[15...opt.length] if opt.start_with?("force_encoding:")
-          use_conv = false if opt == "no_conversion"
+        close_connection_after_writing
+      else
+        # 分析URL - 選項&下載清單
+        has_options = ids[3].start_with?("options!")
+        fn_encoding = "big5"
+        use_conv = true
+        if has_options
+          options = ids[3][8...ids[3].length].split("!")
+          for opt in options
+            fn_encoding = opt[15...opt.length] if opt.start_with?("force_encoding:")
+            use_conv = false if opt == "no_conversion"
+          end
         end
-      end
-      
-      eps = []
-      
-      eps = has_options ? ids[4] : ids[3]
-      eps = eps.split("!")
-      eps.each_with_index { |val, idx| eps[idx] = val.to_i }
-      # sort
-      eps.sort! { |a, b| ep_list[a][2] <=> ep_list[b][2] }
-      
-      # 抓出所有圖片
-      file_list = []
-      for ep in eps
-        raise URI::InvalidURIError.new if not ep_list.has_key?(ep)
         
-        open("http://#{$open_sesame_url}/bukas/#{id}/view/?cid=#{ep}", $open_sesame_auth) do |sesame|
-          while (!sesame.eof?)
-            line = sesame.readline
-            file_list.push ["#{type_list[ep_list[ep][0]]}/#{ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
-          end
-          raise OpenURI::HTTPError.new("format err", nil) if file_list.empty?
+        eps = []
+        
+        eps = has_options ? ids[4] : ids[3]
+        eps = eps.split("!")
+        eps.each_with_index { |val, idx| eps[idx] = val.to_i }
+        # sort
+        eps.sort! { |a, b| @ep_list[a][2] <=> @ep_list[b][2] }
+        
+        @file_list = []
+        
+        download_list(id, eps) do
+          @filename = "book-#{book_name}_#{id}_#{rand(10000)}.zip"
+          
+          # ready to download - add record
+          $downloading_clients.push self
+          
+          start_archiever(fn_encoding, use_conv)
         end
       end
-      
-      
-      fn = "book-#{book_name}_#{id}_#{rand(10000)}.zip"
-      
-      
-      
-      # ready to download - add record
-      $download_clients[client_id] = fn
-      
-      
-      
-      socket.print "HTTP/1.1 200 OK\r\n" +
-                   "Content-Type: application/octet-stream\r\n" +
-                   "Content-Disposition: attachment; filename=\"#{fn}\";\r\n" +
-                   "Connection: close\r\n"
-      socket.print "\r\n"
-      
-      read_to_down_check = 0
-      
-      zos = Zip::MyZipOutputStream.open(fn, SocketWrapper.new(socket))
-      for i in file_list
-        fc = get_file(i[1])
-        logger.info "#{client_id} - Saving file - #{i[2]} - #{i[0]}"
-        if $ready_to_down
-          if read_to_down_check != i[3] # ep changed! - time to abort
-            zos.put_next_entry(encode_str("下線維修中，請稍後再繼續下載(中斷處為最後下載中的一話or集)"))
-            zos.puts "下線維修中，請稍後再繼續下載(中斷處為最後下載中的一話or集)"
-            break
-          else # my fault - server file (!?
-            zos.put_next_entry(encode_str(i[0], fn_encoding, use_conv))
-            zos.puts fc
-          end
-        elsif fc
-          zos.put_next_entry(encode_str(i[0], fn_encoding, use_conv))
-          zos.puts fc
-        else
-          zos.put_next_entry("Something Wrong!!!")
-          zos.puts "Something Wrong!!!"
-          break
-        end
-        # set after processed
-        read_to_down_check = i[3]
-      end
-      zos.close
-      logger.info "#{client_id} - Download finished!"
-      
-      
     end
-    
-    
-    
-  elsif ids.size == 3 # 單話
+  end
+  
+  def download_list(id, eps, &block) # must give block (run after finished fetching)
+    # 抓出所有圖片
+    ep = eps[0]
+    open_sesame_req("/bukas/#{id}/view/?cid=#{ep}") do |res|
+      if @conn_closed
+        end_download
+      elsif res
+        ori_size = @file_list.size
+        res.each_line do |line|
+          @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+        end
+        eps.shift
+        if @file_list.size == ori_size
+          bad_gateway
+        elsif eps.empty?
+          yield
+        else
+          download_list(id, eps, &block)
+        end
+      else
+        bad_gateway
+      end
+    end
+  end
+  
+  
+  # download single ep
+  def handle_single
+    ids = @uri.split("/")
     id1 = ids[1].to_i
     id2 = ids[2].to_i
     
-    raise URI::InvalidURIError.new if id1 == 0 || id2 == 0
-    
-    ####
-    file_list = []
-    book_name = ""
-    open("http://#{$open_sesame_url}/bukas/#{id1}/view/?cid=#{id2}", $open_sesame_auth) do |sesame|
-      while (!sesame.eof?)
-        line = sesame.readline
-        file_list.push [$2, "#{$1}/#{$2}"] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+    open_sesame_req("/bukas/#{id1}/view/?cid=#{id2}") do |res|
+      @file_list = []
+      book_name = ""
+      res.each_line do |line|
+        @file_list.push [$2, "#{$1}/#{$2}", "#{id1}-#{id2}", id2] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
         book_name = $1.chomp if line =~ /<h1>(.+)<\/h1>/
       end
-      raise OpenURI::HTTPError.new("format err", nil) if file_list.empty?
-    end
-    
-    
-    
-    
-    fn = "book-#{book_name}_ep_#{id1}_#{id2}.zip"
-    
-    
-    # ready to download - add record
-    $download_clients[client_id] = fn
-    
-    
-    socket.print "HTTP/1.1 200 OK\r\n" +
-                 "Content-Type: application/octet-stream\r\n" +
-                 "Content-Disposition: attachment; filename=\"#{fn}\";\r\n" +
-                 "Connection: close\r\n"
-    socket.print "\r\n"
-    
-    zos = Zip::MyZipOutputStream.open(fn, SocketWrapper.new(socket))
-    for i in file_list
-      fc = get_file(i[1])
-      logger.info "#{client_id} - Saving file - #{id1}-#{id2} - #{i[0]}"
-      # ignore ready_to_down here - just wait it over (since there only a few files)
-      if fc
-        zos.put_next_entry(i[0])
-        zos.puts fc
-      else
-        zos.put_next_entry("Something Wrong!!!")
-        zos.puts "Something Wrong!!!"
-        break
+      if @file_list.empty?
+        bad_gateway
+      elsif not @conn_closed
+        @filename = "book-#{book_name}_ep_#{id1}_#{id2}.zip"
+        
+        # ready to download - add record
+        $downloading_clients.push self
+        
+        start_archiever("big5", true)
       end
     end
-    zos.close
-    logger.info "#{client_id} - Download finished!"
     
-    
-  else
-    raise URI::InvalidURIError.new
   end
   
-rescue URI::InvalidURIError => exception
-  socket.print "HTTP/1.1 403 Forbidden\r\n" +
+  
+  
+  # request open sesame part
+  def create_sesame_con
+    @os_conn = EventMachine::HttpRequest.new($open_sesame_url)
+  end
+  
+  def open_sesame_req(path, &block) # must give block
+    create_sesame_con unless @os_conn
+    req = @os_conn.get :path => path, :keepalive => true, :head => $open_sesame_auth
+    req.callback {
+      yield req.response
+    }
+    req.errback {
+      if req.error == 'connection closed by server'
+        create_sesame_con
+        open_sesame_req path, &block
+      else
+        bad_gateway
+      end
+    }
+  end
+  
+  # request bukas part
+  def create_bukas_con
+    @bukas_conn = EventMachine::HttpRequest.new("http://c-pic3.weikan.cn")
+  end
+  
+  def bukas_req(path, retry_count = 0, &block) # must give block
+    create_bukas_con unless @bukas_conn
+    req = @bukas_conn.get :path => path, :keepalive => true
+    req.callback {
+      yield req.response
+    }
+    req.errback {
+      if req.error == 'connection closed by server'
+        create_bukas_con
+        bukas_req path, &block
+      elsif retry_count >= 3
+        yield false
+      else
+        bukas_req path, retry_count + 1, &block
+      end
+    }
+  end
+  
+  
+  # download file & add it to archieve
+  def process_file(zos, fn_encoding, use_conv)
+    file_now = @file_list[0]
+    path = file_now[1]
+    path = $1 if path =~ /http:\/\/c-pic3.weikan.cn\/(.*)/
+    raise "weird uri !!!" if path =~ /http:\/\/([^\/]+)\/(.*)/
+    bukas_req(path) do |res|
+      if @conn_closed
+        end_download
+        zip_end zos
+      elsif $ready_to_down and @read_to_down_check != file_now[3]
+        zos.put_next_entry(encode_str("下線維修中，請稍後再繼續下載(中斷處為最後下載中的一話or集)"))
+        zos.puts "下線維修中，請稍後再繼續下載(中斷處為最後下載中的一話or集)"
+        zip_end zos
+      elsif res
+        $logger.info "#{@client_id} - Saving file - #{file_now[2]} - #{file_now[0]}"
+        zos.put_next_entry(encode_str(file_now[0], fn_encoding, use_conv))
+        zos.puts res
+        @read_to_down_check = file_now[3]
+        @file_list.shift
+        if @file_list.empty?
+          $logger.info "#{@client_id} - Download finished!"
+          zip_end zos
+        else
+          process_file(zos, fn_encoding, use_conv)
+        end
+      else
+        $logger.info "bukas wrong! - #{file_now[1]}"
+        zos.put_next_entry("Something Wrong!!!")
+        zos.puts "Something Wrong!!!"
+        zip_end zos
+      end
+    end
+  end
+  
+  # start archiever !!!
+  def start_archiever(fn_encoding, use_conv)
+    send_data "HTTP/1.1 200 OK\r\n" +
+              "Content-Type: application/octet-stream\r\n" +
+              "Content-Disposition: attachment; filename=\"#{@filename}\";\r\n" +
+              "Connection: close\r\n" +
+              "\r\n"
+    
+    zos = Zip::MyZipOutputStream.open(@filename, EMConnWrapper.new(self))
+    @read_to_down_check = 0
+    process_file(zos, fn_encoding, use_conv)
+  end
+  
+  def zip_end(zos)
+    zos.close
+    close_connection_after_writing
+  end
+  
+  
+  # error methods
+  def bad_request
+    send_error "HTTP/1.1 400 Bad request\r\n" +
+               "Connection: close\r\n" +
+               "Content-type: text/plain\r\n" +
+               "\r\n" +
+               "Bad Request"
+  end
+  def forbidden(reason = nil)
+    case reason
+    when :ip
+      msg = "You are downloading too many files simultaneously - Clam down!"
+    when :total
+      msg = "Server is busy now - try again latter"
+    when :down
+      msg = "本服務準備下線維修/更新<br\>暫時停止新下載連線<br\>請等待維修/更新結束，稍後再連線"
+    else
+      msg = "Forbidden"
+    end
+    send_error "HTTP/1.1 403 Forbidden\r\n" +
+               "Content-Type: text/html; charset=\"utf-8\"\r\n" +
+               "Connection: close\r\n" +
+               "\r\n" +
+               msg
+  end
+  def not_found
+    send_error "HTTP/1.1 404 Not Found\r\n" +
                "Content-Type: text/html\r\n" +
-               "Connection: close\r\n"
-  socket.print "\r\n"
-  socket.print "Frobidden - Invaild URI"
-rescue OpenURI::HTTPError => exception
-  socket.print "HTTP/1.1 502 Bad Gateway\r\n" +
+               "Connection: close\r\n" +
+               "\r\n" +
+               "Not Found - Invaild URI"
+  end
+  def not_implemented
+    send_error "HTTP/1.1 501 Not Implemented\r\n" +
+               "Connection: close\r\n" +
+               "\r\n" +
+               "501 Not Implemented"
+  end
+  def bad_gateway
+    $logger.error "bad gateway!\n" +
+                  "URI: " + @uri.to_s
+    send_error "HTTP/1.1 502 Bad Gateway\r\n" +
                "Content-Type: text/html\r\n" +
-               "Connection: close\r\n"
-  socket.print "\r\n"
-  socket.print "Bad Gateway - Maybe you entered wrong id pair or something strange happened to OpenSesame"
+               "Connection: close\r\n" +
+               "\r\n" +
+               "Bad Gateway - Maybe you entered wrong id pair or something strange happened to OpenSesame"
+  end
   
-  logger.error request_uri
-rescue ExitEarly
-  # just exit early OwO
-rescue => exception
-  socket.print "HTTP/1.1 500 Internal Server Error\r\n" +
-               "Content-Type: text/html\r\n" +
-               "Connection: close\r\n"
-  socket.print "\r\n"
-  socket.print "Internal Server Error - Please report to admin"
-  
-  logger.error exception.inspect
-  logger.error exception.backtrace
-  logger.error request_uri
-ensure
-  socket.close if socket and !socket.closed?
-  # minus cons
-  tatal_cons -= 1
-  per_ip_cons[ip] -= 1
-  per_ip_cons.delete(ip) if per_ip_cons[ip] == 0
-  
-  # remove downloading record
-  $download_clients.delete(client_id) if $download_clients.has_key?(client_id)
-  
+  def send_error err_cnt
+    send_data err_cnt
+    close_connection_after_writing
+  end
 end
 
 
-end # Thread.fork
 
-end
 
+EventMachine.run {
+  $logger.info "Server waiting..."
+  
+  EventMachine.start_server "127.0.0.1", $srv_port, BukasZipServer
+}
