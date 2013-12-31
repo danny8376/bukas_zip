@@ -673,5 +673,5 @@ end
 EventMachine.run {
   $logger.info "Server waiting..."
   
-  EventMachine.start_server "127.0.0.1", $srv_port, BukasZipServer
+  EventMachine.start_server "0.0.0.0", $srv_port, BukasZipServer
 }
