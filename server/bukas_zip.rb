@@ -276,7 +276,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     when "status"
       send_data $ready_to_down ? "down!\n" : "\\ up /\n"
     when "list", "ls"
-      $downloading_clients.each { |client| send_data "%-30s : %s\n" % [client.client_id, @win_mode ? encode_str(client.filename) : client.filename]}
+      $downloading_clients.each { |client| send_data "%-35s : %s\n" % [client.client_id, @win_mode ? encode_str(client.filename) : client.filename]}
       send_data "========== finish ==========\n"
     when "notify"
       if @notify_thread and @notify_thread.alive?
