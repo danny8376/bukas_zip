@@ -214,8 +214,8 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   attr_reader :peer_ip, :client_id, :filename
   def post_init
     super
-    port, @peer_ip = Socket.unpack_sockaddr_in(get_peername)
-    @client_id = "#{@peer_ip}:#{port}-#{Time.now.to_i}"
+    @peer_port, @peer_ip = Socket.unpack_sockaddr_in(get_peername)
+    @client_id = "#{@peer_ip}:#{@peer_port}-#{Time.now.to_i}"
     @os_conn = @bukas_conn = nil
     @read_to_down_check = 0
     @conn_closed = false
@@ -320,6 +320,17 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   # process request
   def receive_request(headers, content)
     @headers = headers_2_hash headers
+    
+    # for reverse proxies
+    if @headers[:x_real_ip] and @headers[:x_real_port] and $trusted_proxies.include? @peer_ip
+      @peer_ip = @headers[:x_real_ip]
+      @peer_port = @headers[:x_real_port].to_i
+      @client_id = "#{@peer_ip}:#{@peer_port}-#{Time.now.to_i}"
+    elsif @headers[:x_real_ip] and $trusted_proxies.include? @peer_ip
+      @peer_ip = @headers[:x_real_ip]
+      @client_id = "#{@peer_ip}:P#{@peer_port}-#{Time.now.to_i}"
+    end
+    
     request = headers.first.split(" ")
     return bad_request unless request.size == 3
     @method, @uri, @protocol = request
