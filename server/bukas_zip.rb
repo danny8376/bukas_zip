@@ -209,6 +209,11 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
   
   
+  BUKAS_SERVERS = [
+    "http://c-pic3.weikan.cn",
+    "http://c-r2.sosobook.cn"
+  ]
+  
   
   
   attr_reader :peer_ip, :client_id, :filename
@@ -217,6 +222,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     @peer_port, @peer_ip = Socket.unpack_sockaddr_in(get_peername)
     @client_id = "#{@peer_ip}:#{@peer_port}-#{Time.now.to_i}"
     @os_conn = @bukas_conn = nil
+    @bukas_conn_svr = 0
     @read_to_down_check = 0
     @conn_closed = false
   end
@@ -547,15 +553,23 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   end
   
   # request bukas part
-  def create_bukas_con
-    @bukas_conn = EventMachine::HttpRequest.new("http://c-pic3.weikan.cn")
+  def create_bukas_con(switch_svr = false)
+    @bukas_conn_svr = (@bukas_conn_svr + 1) % BUKAS_SERVERS.size if switch_svr
+    @bukas_conn = EventMachine::HttpRequest.new(BUKAS_SERVERS[@bukas_conn_svr])
   end
   
   def bukas_req(path, retry_count = 0, &block) # must give block
     create_bukas_con unless @bukas_conn
     req = @bukas_conn.get :path => path, :keepalive => true
     req.callback {
-      yield req.response
+      if req.response_header.status == 200
+        yield req.response
+      elsif retry_count >= 3 # has retried too many times...
+        yield false
+      else # switch to another server 030
+        create_bukas_con true
+        bukas_req path, retry_count + 1, &block
+      end
     }
     req.errback {
       if req.error == 'connection closed by server'
