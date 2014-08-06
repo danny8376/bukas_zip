@@ -556,7 +556,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     req.callback {
       if req.response_header.status == 200
         yield req.response
-      elsif retry_count >= 3 # has retried too many times...
+      elsif retry_count >= 3 * @bukas_servers.size # has retried too many times...
         yield false
       else # switch to another server 030
         create_bukas_con true
@@ -567,8 +567,11 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
       if req.error == 'connection closed by server'
         create_bukas_con
         bukas_req path, &block
-      elsif retry_count >= 3
+      elsif retry_count >= 3 * @bukas_servers.size
         yield false
+      elsif retry_count % 3 == 0
+        create_bukas_con true
+        bukas_req path, retry_count + 1, &block
       else
         bukas_req path, retry_count + 1, &block
       end
