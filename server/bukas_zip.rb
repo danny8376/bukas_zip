@@ -577,8 +577,8 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   def process_file(zos, fn_encoding, use_conv)
     file_now = @file_list[0]
     path = file_now[1]
-    path = $1 if path =~ /http:\/\/c-pic3.weikan.cn\/(.*)/
-    raise "weird uri !!!" if path =~ /http:\/\/([^\/]+)\/(.*)/
+    path = $1 if path =~ /http:\/\/[^\/]+\/(.*)/
+    raise "weird uri !!!" if path =~ /http:\/\/[^\/]+\/.*/
     bukas_req(path) do |res|
       if @conn_closed
         end_download
