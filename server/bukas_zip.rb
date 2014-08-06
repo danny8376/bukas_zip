@@ -343,17 +343,6 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     return not_implemented unless @method == "GET" or @protocol.start_with? "HTTP/"
     # process request
     handle_request
-  rescue Exception => e
-    $logger.error "error happened\n" +
-                  "URI: #{@uri.to_s}\n" +
-                  e.inspect + "\n" +
-                  "\t" + e.backtrace.join("\n\t")
-    
-    send_error "HTTP/1.1 500 Internal Server Error\r\n" +
-               "Content-Type: text/html\r\n" +
-               "Connection: close\r\n" +
-               "\r\n" +
-               "Internal Server Error - Please report this to admin"
   end
   
   # main request handling
@@ -697,6 +686,19 @@ end
 
 EventMachine.run {
   $logger.info "Server waiting..."
+
+  EventMachine.error_handler { |e|
+    $logger.error "error happened\n" +
+#                  "URI: #{@uri.to_s}\n" +
+                  e.inspect + "\n" +
+                  "\t" + e.backtrace.join("\n\t")
+
+#    send_error "HTTP/1.1 500 Internal Server Error\r\n" +
+#               "Content-Type: text/html\r\n" +
+#               "Connection: close\r\n" +
+#               "\r\n" +
+#               "Internal Server Error - Please report this to admin"
+  }
   
   EventMachine.start_server "0.0.0.0", $srv_port, BukasZipServer
 }
