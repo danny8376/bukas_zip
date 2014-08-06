@@ -209,12 +209,6 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
   
   
-  BUKAS_SERVERS = [
-    "http://c-pic3.weikan.cn",
-    "http://c-r2.sosobook.cn"
-  ]
-  
-  
   
   attr_reader :peer_ip, :client_id, :filename
   def post_init
@@ -225,6 +219,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     @bukas_conn_svr = 0
     @read_to_down_check = 0
     @conn_closed = false
+    @bukas_servers = []
   end
   
   def unbind
@@ -474,7 +469,11 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
       elsif res
         ori_size = @file_list.size
         res.each_line do |line|
-          @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+          if line =~ /<a href="\/bukas\/#{id}\/view\/\?cid=#{ep}&host_flag=\d">([^<]+)<\/a>/
+            @bukas_servers.push $1 unless @bukas_servers.include? $1
+          else
+            @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+          end
         end
         eps.shift
         if @file_list.size == ori_size
@@ -501,7 +500,11 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
       @file_list = []
       book_name = ""
       res.each_line do |line|
-        @file_list.push [$2, "#{$1}/#{$2}", "#{id1}-#{id2}", id2] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+        if line =~ /<a href="\/bukas\/#{id1}\/view\/\?cid=#{id2}&host_flag=\d">([^<]+)<\/a>/
+          @bukas_servers.push $1 unless @bukas_servers.include? $1
+        else
+          @file_list.push [$2, "#{$1}/#{$2}", "#{id1}-#{id2}", id2] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+        end
         book_name = $1.chomp if line =~ /<h1>(.+)<\/h1>/
       end
       if @file_list.empty?
@@ -543,8 +546,8 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
   # request bukas part
   def create_bukas_con(switch_svr = false)
-    @bukas_conn_svr = (@bukas_conn_svr + 1) % BUKAS_SERVERS.size if switch_svr
-    @bukas_conn = EventMachine::HttpRequest.new(BUKAS_SERVERS[@bukas_conn_svr])
+    @bukas_conn_svr = (@bukas_conn_svr + 1) % @bukas_servers.size if switch_svr
+    @bukas_conn = EventMachine::HttpRequest.new("http://#{@bukas_servers[@bukas_conn_svr]}")
   end
   
   def bukas_req(path, retry_count = 0, &block) # must give block
