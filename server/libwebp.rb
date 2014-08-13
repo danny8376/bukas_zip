@@ -12,8 +12,8 @@ module WebP
   end
 
   attach_function :WebPGetInfo, [:pointer, :size_t, :pointer, :pointer], :int
-  #attach_function :WebPGetFeatures, [:pointer, :uint32, :pointer], :int
-  attach_function :WebPGetFeaturesInternal, [:pointer, :uint32, :pointer, :int], :int
+  #attach_function :WebPGetFeatures, [:pointer, :size_t, :pointer], :int
+  attach_function :WebPGetFeaturesInternal, [:pointer, :size_t, :pointer, :int], :int
 
   class << self
     def get_info dat
@@ -22,7 +22,7 @@ module WebP
       w, h = (wp.read_bytes(wp.size) + hp.read_bytes(hp.size)).unpack('i*')
       wp.free
       hp.free
-      status == 0 ? [0, 0] : [w, h]
+      status == 0 ? [-1, status] : [w, h]
     end
 
     # Borken?
@@ -38,17 +38,32 @@ module WebP
 
   # decode XXXs
   [:RGBA, :ARGB, :BGRA, :RGB, :BGR].each do |t|
+    ps = t.to_s.size
     self.instance_eval "
-      attach_function :WebPDecode#{t}, [:pointer, :uint32, :pointer, :pointer], :pointer
+      attach_function :WebPDecode#{t}, [:pointer, :size_t, :pointer, :pointer], :pointer
       def decode#{t} dat, unpack = false
         wp, hp = FFI::MemoryPointer.new(:int), FFI::MemoryPointer.new(:int)
         samples_buf = WebPDecode#{t} dat, dat.size, wp, hp
         w, h = (wp.read_bytes(wp.size) + hp.read_bytes(hp.size)).unpack('i*')
-        samples = samples_buf.read_bytes(w * h * #{t.to_s.size})
+        return [w, h, unpack ? [] : ''] if w == 0 or h == 0 or samples_buf.null?
+        samples = samples_buf.read_bytes(w * h * #{ps})
         samples = samples.unpack('C*') if unpack
         wp.free
         hp.free
         samples_buf.free
+        [w, h, samples]
+      end
+
+      attach_function :WebPDecode#{t}Into, [:pointer, :size_t, :pointer, :int, :int], :pointer
+      def bufferedDecode#{t} dat, unpack = false
+        w, h = get_info dat
+        return [w, h, unpack ? [] : ''] if w == 0 or h == 0
+        buf = FFI::MemoryPointer.new(:uint8, w * h * #{ps})
+        res = WebPDecode#{t}Into dat, dat.size, buf, w * h * #{ps}, w * #{ps}
+        return [w, h, unpack ? [] : ''] if res.null?
+        samples = buf.read_bytes(w * h * #{ps})
+        buf.free
+        samples = samples.unpack('C*') if unpack
         [w, h, samples]
       end
     "
