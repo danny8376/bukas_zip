@@ -40,11 +40,12 @@ module WebP
   [:RGBA, :ARGB, :BGRA, :RGB, :BGR].each do |t|
     self.instance_eval "
       attach_function :WebPDecode#{t}, [:pointer, :uint32, :pointer, :pointer], :pointer
-      def decode#{t} dat
+      def decode#{t} dat, unpack = false
         wp, hp = FFI::MemoryPointer.new(:int), FFI::MemoryPointer.new(:int)
         samples_buf = WebPDecode#{t} dat, dat.size, wp, hp
         w, h = (wp.read_bytes(wp.size) + hp.read_bytes(hp.size)).unpack('i*')
-        samples = samples_buf.read_bytes(w * h * #{t.to_s.size}).unpack('C*')
+        samples = samples_buf.read_bytes(w * h * #{t.to_s.size})
+        samples = samples.unpack('C*') if unpack
         wp.free
         hp.free
         samples_buf.free
