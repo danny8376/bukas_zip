@@ -7,6 +7,10 @@ require 'socket'
 require 'em-http'
 require 'logger'
 
+# My own libs
+require './libwebp'
+require './libpng'
+
 # Ropencc
 begin
   require 'ropencc'
@@ -472,7 +476,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
           if line =~ /<a href="\/bukas\/#{id}\/view\/\?cid=#{ep}&host_flag=\d">([^<]+)<\/a>/
             @bukas_servers.push $1 unless @bukas_servers.include? $1
           else
-            @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+            @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}", "#{id}-#{ep}", ep] if line =~ /<span><img src="\/buka_loader\/[^\/]+\/(.+)\/(.+)\.l\.bup\.webp"><\/span><br\/>/
           end
         end
         eps.shift
@@ -503,9 +507,9 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         if line =~ /<a href="\/bukas\/#{id1}\/view\/\?cid=#{id2}&host_flag=\d">([^<]+)<\/a>/
           @bukas_servers.push $1 unless @bukas_servers.include? $1
         else
-          @file_list.push [$2, "#{$1}/#{$2}", "#{id1}-#{id2}", id2] if line =~ /<span><img data-src="(.+)\/(.+)"><\/span><br\/>/
+          @file_list.push [$2, "#{$1}/#{$2}", "#{id1}-#{id2}", id2] if line =~ /<span><img src="\/buka_loader\/[^\/]+\/(.+)\/(.+)\.l\.bup\.webp"><\/span><br\/>/
         end
-        book_name = $1.chomp if line =~ /<h1>(.+)<\/h1>/
+        book_name = $1.chomp if line =~ /<h4>(.+)<\/h4>/
       end
       if @file_list.empty?
         bad_gateway
@@ -548,6 +552,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   def create_bukas_con(switch_svr = false)
     @bukas_conn_svr = (@bukas_conn_svr + 1) % @bukas_servers.size if switch_svr
     @bukas_conn = EventMachine::HttpRequest.new("http://#{@bukas_servers[@bukas_conn_svr]}")
+    $logger.info "#{@client_id} - Bukas Connecting - #{@bukas_servers[@bukas_conn_svr]}"
   end
   
   def bukas_req(path, retry_count = 0, &block) # must give block
@@ -582,9 +587,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   # download file & add it to archieve
   def process_file(zos, fn_encoding, use_conv)
     file_now = @file_list[0]
-    path = file_now[1]
-    path = $1 if path =~ /http:\/\/[^\/]+\/(.*)/
-    raise "weird uri !!!" if path =~ /http:\/\/[^\/]+\/.*/
+    path = "#{file_now[1]}.l.bup"
     bukas_req(path) do |res|
       if @conn_closed
         end_download
@@ -595,15 +598,21 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         zip_end zos
       elsif res
         $logger.info "#{@client_id} - Saving file - #{file_now[2]} - #{file_now[0]}"
-        zos.put_next_entry(encode_str(file_now[0], fn_encoding, use_conv))
-        zos.puts res
-        @read_to_down_check = file_now[3]
-        @file_list.shift
-        if @file_list.empty?
-          $logger.info "#{@client_id} - Download finished!"
-          zip_end zos
-        else
+        zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.png")
+        res = res[64..-1]
+        w, h, d = WebP.bufferedDecodeRGBA(res)
+        if d.empty?
           process_file(zos, fn_encoding, use_conv)
+        else
+          zos.puts PNG.encodePNG(w, h, d)
+          @read_to_down_check = file_now[3]
+          @file_list.shift
+          if @file_list.empty?
+            $logger.info "#{@client_id} - Download finished!"
+            zip_end zos
+          else
+            process_file(zos, fn_encoding, use_conv)
+          end
         end
       else
         $logger.info "bukas wrong! - #{file_now[1]}"
