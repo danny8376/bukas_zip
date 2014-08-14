@@ -9,14 +9,14 @@ require 'logger'
 
 # My own libs
 require './libwebp'
-#require './libpng'
+require './libpng'
 require './libjpeg'
 
 # Ropencc
 begin
   require 'ropencc'
   $use_tc2zc_convert = true
-rescue LoadError => exception
+rescue LoadError
   $use_tc2zc_convert = false
 end
 
@@ -443,13 +443,23 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         has_options = ids[3].start_with?("options!")
         fn_encoding = "big5"
         use_conv = true
+        output_format = "jpg"
         if has_options
           options = ids[3][8...ids[3].length].split("!")
           for opt in options
-            fn_encoding = opt[15...opt.length] if opt.start_with?("force_encoding:")
-            use_conv = false if opt == "no_conversion"
+            opt = opt.split ":"
+            case opt[0]
+            when "force_encoding"
+              opt[1] ? ( fn_encoding = opt[1] ) : not_found
+            when "no_conversion"
+              use_conv = false
+            when "output_format"
+              opt[1] ? ( output_format = opt[1].downcase ) : not_found
+            end
           end
         end
+
+        output_format = "jpg" unless ["jpg", "webp"].include? output_format
         
         eps = []
         
@@ -467,7 +477,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
           # ready to download - add record
           $downloading_clients.push self
           
-          start_archiever(fn_encoding, use_conv)
+          start_archiever(fn_encoding, use_conv, output_format)
         end
       end
     end
@@ -595,7 +605,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
   
   # download file & add it to archieve
-  def process_file(zos, fn_encoding, use_conv)
+  def process_file(zos, fn_encoding, use_conv, output_format)
     file_now = @file_list[0]
     bukas_req(file_now[1]) do |res|
       if @conn_closed
@@ -607,27 +617,38 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         zip_end zos
       elsif res
         $logger.info "#{@client_id} - Saving file - #{file_now[2]} - #{file_now[0]}"
-        #zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.png")
-        zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.jpg")
+        zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.#{output_format}")
         res = res[64..-1]
-        #w, h, d = WebP.decodeRGBA(res)
-        w, h, d = WebP.decodeRGB(res)
+        w, h, d = case output_format
+                  when "webp"
+                    [-1, -1, res]
+                  when "png"
+                    WebP.decodeRGBA(res)
+                  else # jpg (RGB) is default
+                    WebP.decodeRGB(res)
+                  end
         if d.empty?
-          #process_file(zos, fn_encoding, use_conv)
+          #process_file(zos, fn_encoding, use_conv, output_format)
           $logger.info "#{@client_id} - bukas wrong! - webp decoding failed - #{file_now[1]}"
           zos.put_next_entry("Something Wrong!!!")
           zos.puts "Something Wrong!!!"
           zip_end zos
         else
-          #zos.puts PNG.encodePNG(w, h, d)
-          zos.puts JPEG.encodeJPEG(w, h, d)
+          zos.puts case output_format
+                   when "webp"
+                     d
+                   when "png"
+                     PNG.encodePNG(w, h, d)
+                   else # jpg is default
+                     JPEG.encodeJPEG(w, h, d)
+                   end
           @read_to_down_check = file_now[3]
           @file_list.shift
           if @file_list.empty?
             $logger.info "#{@client_id} - Download finished!"
             zip_end zos
           else
-            process_file(zos, fn_encoding, use_conv)
+            process_file(zos, fn_encoding, use_conv, output_format)
           end
         end
       else
@@ -640,7 +661,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   end
   
   # start archiever !!!
-  def start_archiever(fn_encoding, use_conv)
+  def start_archiever(fn_encoding, use_conv, output_format)
     send_data "HTTP/1.1 200 OK\r\n" +
               "Content-Type: application/octet-stream\r\n" +
               "Content-Disposition: attachment; filename=\"#{@filename}\";\r\n" +
@@ -649,7 +670,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     
     zos = Zip::MyZipOutputStream.open(@filename, EMConnWrapper.new(self))
     @read_to_down_check = 0
-    process_file(zos, fn_encoding, use_conv)
+    process_file(zos, fn_encoding, use_conv, output_format)
   end
   
   def zip_end(zos)
