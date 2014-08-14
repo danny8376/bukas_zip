@@ -3,6 +3,7 @@ require 'ffi'
 module WebP
   extend FFI::Library
 
+  ffi_lib FFI::Library::LIBC
   ffi_lib 'libwebp'
 
   class WebPBitstreamFeatures < FFI::Struct
@@ -10,6 +11,8 @@ module WebP
            :height, :int,
            :has_alpha, :int
   end
+
+  attach_function :free, [:pointer], :void
 
   attach_function :WebPGetInfo, [:pointer, :size_t, :pointer, :pointer], :int
   #attach_function :WebPGetFeatures, [:pointer, :size_t, :pointer], :int
@@ -50,7 +53,8 @@ module WebP
         samples = samples.unpack('C*') if unpack
         wp.free
         hp.free
-        samples_buf.free
+        #samples_buf.free
+        free samples_buf
         [w, h, samples]
       end
 
