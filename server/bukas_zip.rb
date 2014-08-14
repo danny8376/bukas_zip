@@ -236,8 +236,8 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
   
   def end_download
     $downloading_clients.delete(self) if $downloading_clients.include?(self)
-    @os_conn.close if @os_conn
-    @bukas_conn.close if @bukas_conn
+    @os_conn.close rescue nil if @os_conn
+    @bukas_conn.close rescue nil if @bukas_conn
   end
   
   # rewrite receive_line for admin console
@@ -560,7 +560,8 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
     req = @bukas_conn.get :path => path, :keepalive => true
     req.callback {
       if req.response_header.status == 200
-        yield req.response
+        create_bukas_con unless req.response_header.keepalive?
+        yield req.response.force_encoding('binary')
       elsif retry_count >= 3 * @bukas_servers.size # has retried too many times...
         yield false
       else # switch to another server 030
@@ -600,7 +601,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         $logger.info "#{@client_id} - Saving file - #{file_now[2]} - #{file_now[0]}"
         zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.png")
         res = res[64..-1]
-        w, h, d = WebP.bufferedDecodeRGBA(res)
+        w, h, d = WebP.decodeRGBA(res)
         if d.empty?
           process_file(zos, fn_encoding, use_conv)
         else
