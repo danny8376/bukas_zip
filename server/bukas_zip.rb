@@ -9,7 +9,8 @@ require 'logger'
 
 # My own libs
 require './libwebp'
-require './libpng'
+#require './libpng'
+require './libjpeg'
 
 # Ropencc
 begin
@@ -599,13 +600,20 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         zip_end zos
       elsif res
         $logger.info "#{@client_id} - Saving file - #{file_now[2]} - #{file_now[0]}"
-        zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.png")
+        #zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.png")
+        zos.put_next_entry("#{encode_str(file_now[0], fn_encoding, use_conv)}.jpg")
         res = res[64..-1]
-        w, h, d = WebP.decodeRGBA(res)
+        #w, h, d = WebP.decodeRGBA(res)
+        w, h, d = WebP.decodeRGB(res)
         if d.empty?
-          process_file(zos, fn_encoding, use_conv)
+          #process_file(zos, fn_encoding, use_conv)
+          $logger.info "#{@client_id} - bukas wrong! - webp decoding failed - #{file_now[1]}"
+          zos.put_next_entry("Something Wrong!!!")
+          zos.puts "Something Wrong!!!"
+          zip_end zos
         else
-          zos.puts PNG.encodePNG(w, h, d)
+          #zos.puts PNG.encodePNG(w, h, d)
+          zos.puts JPEG.encodeJPEG(w, h, d)
           @read_to_down_check = file_now[3]
           @file_list.shift
           if @file_list.empty?
@@ -616,7 +624,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
           end
         end
       else
-        $logger.info "bukas wrong! - #{file_now[1]}"
+        $logger.info "#{@client_id} - bukas wrong! - no data - #{file_now[1]}"
         zos.put_next_entry("Something Wrong!!!")
         zos.puts "Something Wrong!!!"
         zip_end zos
