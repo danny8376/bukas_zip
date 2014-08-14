@@ -182,7 +182,8 @@ end
 
 
 
-$index = File.open("bukas_zip_index.html", "r") {|f| f.read}
+$index = open("bukas_zip_index.html", "r") {|f| f.read}
+$favicon = open("bukas_favicon.ico", "rb") {|f| f.read}
 
 
 $downloading_clients = []
@@ -361,6 +362,13 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
                 "Connection: close\r\n" +
                 "\r\n"
       send_data "User-agent: *\nDisallow: /"
+      close_connection_after_writing
+    when "/favicon.ico"
+      send_data "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: image/x-icon\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+      send_data $favicon
       close_connection_after_writing
     when /^\/\d+\/\d+$/
       download_busy? { handle_single }
