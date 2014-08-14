@@ -174,6 +174,8 @@ def encode_str(str, force = "big5", conv = true)
   when "gbk"
     str = Ropencc.conv(:trad_to_simp, str) if $use_tc2zc_convert and conv
     return str.encode("gbk", {:invalid => :replace, :undef => :replace})
+  else # just return what given if unknown options given
+    return str
   end
 end
 
