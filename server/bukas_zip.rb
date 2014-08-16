@@ -497,7 +497,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
           if line =~ /<a href="\/bukas\/#{id}\/view\/\?cid=#{ep}&host_flag=\d">([^<]+)<\/a>/
             @bukas_servers.push $1 unless @bukas_servers.include? $1
           else
-            @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}#{$3}", "#{id}-#{ep}", ep] if line =~ /<span><img src="\/buka_loader\/[^\/]+\/(.+)\/([^.]+)(.*)\.webp"><\/span><br\/>/
+            @file_list.push ["#{@type_list[@ep_list[ep][0]]}/#{@ep_list[ep][1]}/#{$2}", "#{$1}/#{$2}#{$3}", "#{id}-#{ep}", ep] if line =~ /"\/buka_loader\/[^\/]+\/(.+)\/([^.]+)(.*)\.webp"/
           end
         end
         eps.shift
@@ -528,7 +528,7 @@ class BukasZipServer < EventMachine::Protocols::HeaderAndContentProtocol
         if line =~ /<a href="\/bukas\/#{id1}\/view\/\?cid=#{id2}&host_flag=\d">([^<]+)<\/a>/
           @bukas_servers.push $1 unless @bukas_servers.include? $1
         else
-          @file_list.push [$2, "#{$1}/#{$2}#{$3}", "#{id1}-#{id2}", id2] if line =~ /<span><img src="\/buka_loader\/[^\/]+\/(.+)\/([^.]+)(.*)\.webp"><\/span><br\/>/
+          @file_list.push [$2, "#{$1}/#{$2}#{$3}", "#{id1}-#{id2}", id2] if line =~ /"\/buka_loader\/[^\/]+\/(.+)\/([^.]+)(.*)\.webp"/
         end
         book_name = $1.chomp if line =~ /<h4>(.+)<\/h4>/
       end
