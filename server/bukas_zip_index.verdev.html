@@ -1,14 +1,65 @@
 <!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta charset="UTF-8"><link rel="icon" type="image/png" href="/favicon.ico" /><title>奇妙工具</title>
-<script>function ajax(e,t){var n=new XMLHttpRequest
-void 0!==t&&(n.onreadystatechange=function(){4==n.readyState&&200==n.status?t(n.responseText):4!=n.readyState||403!=n.status&&502!=n.status||(document.getElementById("err").innerHTML=n.responseText)}),n.open("GET",e,!0),n.send(null)}function dl(){var e,t=document.getElementById("link")
-if("請選擇欲下載之集數"==t.value){for(var n=[],l=0;l<types.length;l++)for(var o=document.getElementById("typesel_"+types[l]).options,a=0;a<o.length;a++)o[a].selected&&n.push(o[a].value),o[a].selected=!1
-location.href="/"+book_id+"/book/"+n.join("!")}else(e=t.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/view\/\?cid=([0-9]+)/))?(document.getElementById("list").innerHTML="",t.value="",location.href="/"+e[1]+"/"+e[2]):(e=t.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/book/))?(book_id=e[1],ajax("/"+book_id+"/book/list",function(e){var n=e.split("\n")
-types=[]
-for(var l=-1,o="<tr>",a="<tr>",s=0;s<n.length;s++){var d=n[s].split("!")
-if("type"==d[0]){var i=parseInt(d[1],10)
-l!=i&&(l=i,types.push(i),o+="<td>"+d[2]+"</td>",-1!=l&&(a+="</select></td>"),a+='<td><select id="typesel_'+i+'" size="30" multiple="multiple" style="min-width: 100px;">')}else"ep"==d[0]&&(a+='<option value="'+d[1]+'">'+d[2]+"</option>")}document.getElementById("list").innerHTML="<table>"+o+"</tr>"+a+"</select></td></tr></table>",t.value="請選擇欲下載之集數",document.getElementById("dlbtn").value="下載"})):document.getElementById("err").innerHTML="輸入錯誤"}function input_change(){document.getElementById("err").innerHTML=""
-var e=document.getElementById("dlbtn")
-e.value=(res=link.value.match(/(?:http:\/\/)?(.+):(.+)\/bukas\/([0-9]+)\/book/))?"清單":"下載"}</script>
+<script>
+function ajax(q,c){var x=new XMLHttpRequest();if(typeof c!="undefined")x.onreadystatechange=function(){if(x.readyState==4&&x.status==200)c(x.responseText);else if(x.readyState==4&&(x.status==403||x.status==502))document.getElementById("err").innerHTML=x.responseText;};x.open("GET",q,true);x.send(null)}
+function dl() {
+	var link = document.getElementById("link");
+	var res;
+	if (link.value == "請選擇欲下載之集數") {
+		var id = [];
+		for(var i=0;i<types.length;i++) {
+			var opts = document.getElementById("typesel_" + types[i]).options;
+			for (var j=0;j<opts.length; j++) {
+				if (opts[j].selected) id.push(opts[j].value);
+				opts[j].selected = false;
+			}
+		}
+		location.href = "/" + book_id + "/book/" + id.join("!");
+	} else if (res = link.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/view\/\?cid=([0-9]+)/)) {
+		document.getElementById("list").innerHTML = "";
+		link.value = "";
+		location.href = "/" + res[1] + "/" + res[2];
+	} else if (res = link.value.match(/(?:http:\/\/)?(?:.+):(?:.+)\/bukas\/([0-9]+)\/book/)) {
+		book_id = res[1];
+		ajax("/" + book_id + "/book/list",function(res) {
+			var ary = res.split("\n");
+			types = [];
+			var type_now = -1;
+			var type_heads = "<tr>"
+			var opts = "<tr>";
+			for(var i=0;i<ary.length;i++) {
+				var sub = ary[i].split("!");
+				if (sub[0] == "type") {
+					var type = parseInt(sub[1], 10);
+					if (type_now != type) {
+						type_now = type;
+						types.push(type);
+						type_heads += "<td>" + sub[2] + "</td>";
+						if (type_now != -1) opts += '</select></td>';
+						opts += '<td><select id="typesel_' + type + '" size="30" multiple="multiple" style="min-width: 100px;">';
+					}
+				} else if (sub[0] == "ep") {
+					opts += '<option value="' + sub[1] + '">' + sub[2] + '</option>';
+				}
+			}
+			document.getElementById("list").innerHTML = '<table>' + type_heads + '</tr>' + opts + '</select></td></tr></table>';
+			link.value = "請選擇欲下載之集數";
+			document.getElementById('dlbtn').value = "下載";
+		});
+	} else {
+		document.getElementById("err").innerHTML = "輸入錯誤";
+	}
+}
+function input_change() {
+	document.getElementById('err').innerHTML = '';
+	var dlbtn = document.getElementById('dlbtn');
+	if (res = link.value.match(/(?:http:\/\/)?(.+):(.+)\/bukas\/([0-9]+)\/book/)) {
+		dlbtn.value = "清單";
+	} else {
+		dlbtn.value = "下載";
+	}
+}
+</script>
+<style></style>
 </head><body>
 <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAABPCAMAAAAz8LxwAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNS1jMDIxIDc5LjE1NTc3MiwgMjAxNC8wMS8xMy0xOTo0NDowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTQgKFdpbmRvd3MpIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOjMzRUNDNDBGMjNBNTExRTQ5QkI4QUY4NTZFRjA5MjU4IiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOjMzRUNDNDEwMjNBNTExRTQ5QkI4QUY4NTZFRjA5MjU4Ij4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6MzNFQ0M0MEQyM0E1MTFFNDlCQjhBRjg1NkVGMDkyNTgiIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6MzNFQ0M0MEUyM0E1MTFFNDlCQjhBRjg1NkVGMDkyNTgiLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz6ukAwuAAADAFBMVEXTydSM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"/><br/>
 輸入芝麻開門的布卡連結<br>
