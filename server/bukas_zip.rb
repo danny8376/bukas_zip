@@ -20,8 +20,12 @@ rescue LoadError
   $use_tc2zc_convert = false
 end
 
+def r(path)
+  File.expand_path(path, File.dirname(__FILE__))
+end
 
-load File.expand_path('open_sesame.secret', File.dirname(__FILE__)) # got secret !
+
+load r 'open_sesame.secret' # got secret !
 
 
 if ENV['PORT']  # heroku Owo
@@ -184,8 +188,8 @@ end
 
 
 
-$index = open("bukas_zip_index.html", "r") {|f| f.read}
-$favicon = open("bukas_favicon.ico", "rb") {|f| f.read}
+$index = File.read r "bukas_zip_index.html"
+$favicon = File.read r "bukas_favicon.ico"
 
 
 $downloading_clients = []
