@@ -8,9 +8,9 @@ require 'em-http'
 require 'logger'
 
 # My own libs
-require './libwebp'
-require './libpng'
-require './libjpeg'
+require_relative 'libwebp'
+require_relative 'libpng'
+require_relative 'libjpeg'
 
 # Ropencc
 begin
@@ -21,7 +21,7 @@ rescue LoadError
 end
 
 
-load("open_sesame.secret") # got secret !
+load File.expand_path('open_sesame.secret', File.dirname(__FILE__)) # got secret !
 
 
 if ENV['PORT']  # heroku Owo
